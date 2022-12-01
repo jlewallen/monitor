@@ -10,6 +10,11 @@ use rusoto_ses::Ses;
 use rusoto_ses::{RawMessage, SendRawEmailRequest, SesClient};
 use std::collections::HashMap;
 use structopt::StructOpt;
+use tokio::fs::OpenOptions;
+use tokio::{
+    fs::File,
+    io::{AsyncReadExt, AsyncWriteExt},
+};
 
 #[derive(Debug, StructOpt)]
 struct Opt {
@@ -19,6 +24,8 @@ struct Opt {
     verbose: bool,
     #[structopt(short, long)]
     email: bool,
+    #[structopt(short, long)]
+    only_changes: bool,
 }
 
 #[derive(Debug)]
@@ -90,6 +97,19 @@ async fn get_server_status(client: &Client, ids: Option<Vec<String>>) -> Result<
     Ok(servers)
 }
 
+async fn read_previous_state(path: &str) -> Option<String> {
+    if let Ok(mut file) = File::open(path).await {
+        let mut buffer = String::new();
+        if let Ok(_) = file.read_to_string(&mut buffer).await {
+            Some(buffer)
+        } else {
+            None
+        }
+    } else {
+        None
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
@@ -98,6 +118,7 @@ async fn main() -> Result<()> {
         region,
         email,
         verbose: _verbose,
+        only_changes,
     } = Opt::from_args();
 
     let region_provider = RegionProviderChain::first_try(region.map(Region::new))
@@ -129,7 +150,34 @@ async fn main() -> Result<()> {
 
     println!("{}", paragraph);
 
-    if email {
+    let notifying = email && !only_changes;
+
+    let modified = if only_changes {
+        let state_path = "/tmp/monitor-state.txt";
+        let modified = if let Some(previous) = read_previous_state(state_path).await {
+            previous != paragraph
+        } else {
+            true
+        };
+
+        if modified {
+            let mut options = OpenOptions::new();
+            let mut file = options
+                .create(true)
+                .write(true)
+                .truncate(true)
+                .open(state_path)
+                .await?;
+            file.write_all(paragraph.as_bytes()).await?;
+            file.flush().await?;
+        }
+
+        modified && email
+    } else {
+        false
+    };
+
+    if notifying || modified {
         let ses_client = SesClient::new(rusoto_core::Region::UsEast1);
 
         let from = "FK <noreply@fieldkit.org>";
