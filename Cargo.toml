@@ -1,0 +1,20 @@
+[package]
+name = "monitor"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+anyhow = "1.0.66"
+aws-config = "0.51.0"
+aws-sdk-ec2 = "0.21.0"
+aws-types = "0.51.0"
+base64 = "0.13.1"
+itertools = "0.10.5"
+lettre = "0.10.1"
+rusoto_core = { version = "0.48.0" }
+rusoto_ses = { version = "0.48.0" }
+structopt = "0.3.26"
+tokio = { version = "1.22.0", features = ["full"] }
+tracing-subscriber = { version = "0.3.16", features = ["env-filter"] }
