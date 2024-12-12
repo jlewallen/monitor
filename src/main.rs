@@ -1,9 +1,10 @@
 use anyhow::Result;
 use aws_config::meta::region::RegionProviderChain;
-use aws_sdk_ec2::{
-    model::{InstanceState, InstanceStatus, InstanceStatusSummary, Tag},
-    Client, Region,
-};
+use aws_config::{BehaviorVersion, Region};
+use aws_sdk_ec2::types::{InstanceState, InstanceStatus, InstanceStatusSummary, Tag};
+use aws_sdk_ec2::Client;
+use base64::prelude::BASE64_STANDARD;
+use base64::Engine;
 use itertools::Itertools;
 use lettre::{message::MultiPart, Message};
 use rusoto_ses::Ses;
@@ -64,28 +65,22 @@ async fn get_server_status(client: &Client, ids: Option<Vec<String>>) -> Result<
 
     let described_status_by_id: HashMap<String, InstanceStatus> = instance_status_described
         .instance_statuses()
-        .unwrap()
         .into_iter()
-        .group_by(|r| r.instance_id().unwrap())
+        .chunk_by(|r| r.instance_id().unwrap())
         .into_iter()
         .map(|(id, mut row)| (id.to_owned(), row.next().unwrap().clone()))
         .collect();
 
     let mut servers: Vec<ServerStatus> = Vec::new();
 
-    for reservation in instances_described.reservations().unwrap_or_default() {
-        for instance in reservation.instances().unwrap_or_default() {
+    for reservation in instances_described.reservations() {
+        for instance in reservation.instances() {
             let id = instance.instance_id().unwrap();
 
             if let Some((_, status)) = described_status_by_id.get_key_value(id) {
                 servers.push(ServerStatus {
                     id: id.to_string(),
-                    tags: instance
-                        .tags()
-                        .unwrap()
-                        .into_iter()
-                        .map(|r| r.clone())
-                        .collect(),
+                    tags: instance.tags().into_iter().map(|r| r.clone()).collect(),
                     state: Some(status.instance_state().unwrap().clone()),
                     summary: Some(status.instance_status().unwrap().clone()),
                     system_summary: Some(status.system_status().unwrap().clone()),
@@ -125,7 +120,10 @@ async fn main() -> Result<()> {
         .or_default_provider()
         .or_else(Region::new("us-east-1"));
 
-    let shared_config = aws_config::from_env().region(region_provider).load().await;
+    let shared_config = aws_config::defaults(BehaviorVersion::latest())
+        .region(region_provider)
+        .load()
+        .await;
     let client = Client::new(&shared_config);
 
     let ids: Option<Vec<String>> = Some(vec![]);
@@ -211,7 +209,7 @@ async fn send_email_ses(
 
     let ses_request = SendRawEmailRequest {
         raw_message: RawMessage {
-            data: base64::encode(raw_email).into(),
+            data: BASE64_STANDARD.encode(raw_email).into(),
         },
         ..Default::default()
     };
